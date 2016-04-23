@@ -86,6 +86,8 @@ int main (int argc, char *argv[]) {
 	   else {
 		   serveHTML(connectionSocket);
 	   }
+	   close(connectionSocket);
+	   numberServed++;
    }
 
    // close the server connection after we are done- keep aust beautiful
