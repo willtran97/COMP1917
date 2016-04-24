@@ -1,13 +1,14 @@
-/*  Will Tran + Chris Lam
- *  20/04/2016
- *  bmpServer.c
- *  1917 serve that 3x3 bmp from lab3 Image activity
- *
- *  Created by Tim Lambert on 02/04/12.
- *  Containing code created by Richard Buckland on 28/01/11.
- *  Copyright 2012 Licensed under Creative Commons SA-BY-NC 3.0. 
- *
- */
+﻿
+	/*
+	* bmpServer.c
+	* Serve bmp file to server
+	*
+	* Will Tran + Chris Lam : 24/04/2016
+	* Fixed for mandelbrart
+	* Containing code created by Richard Buckland on 28/01/11.
+	* Copyright 2012 Licensed under Creative Commons SA-BY-NC 3.0.
+	*
+	*/
 
 #include <stdlib.h>
 #include <stdio.h>
@@ -15,14 +16,29 @@
 #include <string.h>
 #include <assert.h>
 #include <unistd.h>
+
 #include "mandelbrot.h"
 #include "pixelColor.h"
 
-int waitForConnection (int serverSocket);
-int makeServerSocket (int portno);
-void serveBMP (int socket, double Xcentre, double Ycentre, int zoom);
-static void serveHTML(int socket);
-void draw(unsigned char bmpData[], double Xcentre, double Ycentre, int zoom);
+#define TRUE 1
+#define FALSE 0
+
+#define MAX_ITERATIONS 256
+
+#define BITMAP_HEIGHT 512
+	// Because the width * bytes per pixel is divisible by 4, we don't
+	// have to worry about rounding up.
+#define BITMAP_WIDTH 512
+#define BITMAP_BYTES_PER_PIXEL 3
+
+	int waitForConnection(int serverSocket);
+int makeServerSocket(int portno);
+void serveViewer(int socket);
+void serveBMP(int socket, double centreX, double centreY, int zoom);
+void generateBitmapImage(unsigned char bmpData[],
+	double centreX, double centreY, int zoom);
+// dealing with non-integer exponents is difficult and unnecessary
+double power(int base, int exponent);
 
 int getValuesFromConnectionString(char* connectionString,
 	double* x, double* y, int* z);
@@ -32,233 +48,206 @@ int readIntFromString(char* string);
 #define SIMPLE_SERVER_VERSION 1.0
 #define REQUEST_BUFFER_SIZE 1000
 #define DEFAULT_PORT 1917
-#define NUMBER_OF_PAGES_TO_SERVE 10
+#define NUMBER_OF_PAGES_TO_SERVE 1000000
 // after serving this many pages the server will halt
 
-#define TRUE 1
-#define FALSE 0
+int main(int argc, char *argv[]) {
+	printf("************************************\n");
+	printf("Starting simple server %f\n", SIMPLE_SERVER_VERSION);
+	printf("Serving bmps since 2012\n");
+	int serverSocket = makeServerSocket(DEFAULT_PORT);
+	printf("Access this server at http://localhost:%d/\n", DEFAULT_PORT);
+	printf("************************************\n");
+	char request[REQUEST_BUFFER_SIZE];
+	int numberServed = 0;
+	while (numberServed < NUMBER_OF_PAGES_TO_SERVE) {
+		printf("*** So far served %d pages ***\n", numberServed);
+		int connectionSocket = waitForConnection(serverSocket);
+		// wait for a request to be sent from a web browser, open a new
+		// connection for this conversation
+		// read the first line of the request sent by the browser
+		int bytesRead;
+		bytesRead = read(connectionSocket, request, (sizeof request) - 1);
+		assert(bytesRead >= 0);
+		// were we able to read any data from the connection?
+		// print entire request to the console
+		printf(" *** Received http request ***\n %s\n", request);
+		//send the browser a simple html page using http
+		printf(" *** Sending http response ***\n");
 
-#define MAX_STEP 256
-#define HEIGHT 512
-#define WIDTH 512
-#define BYTES_PER_PIXEL 3
-#define BMP_SIZE HEIGHT*WIDTH*BYTES_PER_PIXEL
-
-int main (int argc, char *argv[]) {
-      
-   printf ("************************************\n");
-   printf ("Starting simple server %f\n", SIMPLE_SERVER_VERSION);
-   printf ("Serving bmps since 2012\n");   
-   
-   int serverSocket = makeServerSocket (DEFAULT_PORT);   
-   printf ("Access this server at http://localhost:%d/\n", DEFAULT_PORT);
-   printf ("************************************\n");
-   
-   char request[REQUEST_BUFFER_SIZE];
-   
-   int numberServed = 0;
-   while (numberServed < NUMBER_OF_PAGES_TO_SERVE) {
-
-	   printf("*** So far served %d pages ***\n", numberServed);
-
-	   int connectionSocket = waitForConnection(serverSocket);
-	   // wait for a request to be sent from a web browser, open a new
-	   // connection for this conversation
-
-	   // read the first line of the request sent by the browser  
-	   int bytesRead;
-	   bytesRead = read(connectionSocket, request, (sizeof request) - 1);
-	   assert(bytesRead >= 0);
-	   // were we able to read any data from the connection?
-
-	   // print entire request to the console 
-	   printf(" *** Received http request ***\n %s\n", request);
-
-	   //send the browser a simple html page using http
-	   printf(" *** Sending http response ***\n");
-
-	   //getting coordinates and zoom level
-	   double x, y;
-	   int z;
-	   if (getValuesFromConnectionString(request, &x, &y, &z) == TRUE) {
-		   serveBMP(connectionSocket, x, y, z);
-	   }
-	   else {
-		   serveHTML(connectionSocket);
-	   }
-   }
-
-   // close the server connection after we are done- keep aust beautiful
-   printf ("** shutting down the server **\n");
-   close (serverSocket);
-   
-   return EXIT_SUCCESS; 
-}
-
-void serveBMP (int socket, double Xcentre, double Ycentre, int zoom) {
-   char* message;
-   
-   // first send the http response header
-   
-   // (if you write stings one after another like this on separate
-   // lines the c compiler kindly joins them togther for you into
-   // one long string)
-   message = "HTTP/1.0 200 OK\r\n"
-                "Content-Type: image/bmp\r\n"
-                "\r\n";
-   printf ("about to send=> %s\n", message);
-   write (socket, message, strlen (message));
-   
-   // write bmp header
-   unsigned char bmpHeader[] = {
-	   0x42, 0x4D, 0x36, 0x00, 0x0C, 0x00, 0x00, 0x00,
-	   0x00, 0x00, 0x36, 0x00, 0x00, 0x00, 0x28, 0x00,
-	   0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
-	   0x00, 0x00, 0x01, 0x00, 0x18, 0x00, 0x00, 0x00,
-	   0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x13, 0x0B,
-	   0x00, 0x00, 0x13, 0x0B, 0x00, 0x00, 0x00, 0x00,
-	   0x00, 0x00, 0x00, 0x00, 0x00, 0x00
-   };
-   write(socket, bmpHeader, sizeof(bmpHeader));
-
-   // create and draw array for bmp
-   unsigned char bmpData[BMP_SIZE];
-   draw(bmpData, Xcentre, Ycentre, zoom);
-
-   write (socket, bmpData, sizeof(bmpData));
-}
-
-void draw(unsigned char bmpdData[], double Xcentre, double Ycentre, int zoom) {
-	int xdraw;
-	int ydraw = 0;
-
-	int row;
-	int col;
-
-	double xscale = 0;
-	double yscale = 0;
-
-	int i;
-	double scale = 1 / (zoom * zoom);
-
-	while (ydraw < HEIGHT) {
-		xdraw = 0;
-		while (xdraw < WIDTH) {
-			//centering 
-			xscale = Xcentre - (WIDTH / 2)*scale;
-			yscale = Ycentre - (HEIGHT / 2)*scale;
-			//current point
-			xscale += xdraw*scale;
-			yscale += ydraw*scale;
-
-			i = escapeSteps(xscale, yscale);
-			row = ydraw*WIDTH*BYTES_PER_PIXEL;
-			col = xdraw*BYTES_PER_PIXEL;
-			bmpdData[row + col] = stepsToBlue(i);
-			bmpdData[row + col + 1] = stepsToGreen(i);
-			bmpdData[row + col + 2] = stepsToRed(i);
-			xdraw++;
+		double x, y;
+		int z;
+		if (getValuesFromConnectionString(request, &x, &y, &z) == TRUE) {
+			serveBMP(connectionSocket, x, y, z);
 		}
-		ydraw++;
+		else {
+			serveViewer(connectionSocket);
+		}
+
+		// close the connection after sending the page- keep aust beautiful
+		close(connectionSocket);
+		numberServed++;
 	}
+	// close the server connection after we are done- keep aust beautiful
+	printf("** shutting down the server **\n");
+	close(serverSocket);
+	return EXIT_SUCCESS;
 }
+
+void serveViewer(int socket) {
+	char* message = "HTTP/1.0 200 OK\r\n"
+		"Content-Type: text/html\r\n"
+		"\r\n"
+		"<!DOCTYPE html>"
+		"<script src=\"https://almondbread.openlearning.com/tileviewer.js\"></script>";
+
+	write(socket, message, strlen(message));
+}
+
+void serveBMP(int socket, double centreX, double centreY, int zoom) {
+	char* message;
+	// first send the http response header
+	// (if you write stings one after another like this on separate
+	// lines the c compiler kindly joins them togther for you into
+	// one long string)
+	message = "HTTP/1.0 200 OK\r\n"
+		"Content-Type: image/bmp\r\n"
+		"\r\n";
+	printf("about to send=> %s\n", message);
+	write(socket, message, strlen(message));
+
+	// Send the header for a bitmap of size 512x512
+	unsigned char bmpHeader[] = {
+		0x42, 0x4D, 0x36, 0x00, 0x0C, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x36, 0x00, 0x00, 0x00, 0x28, 0x00,
+		0x00, 0x00, 0x00, 0x02, 0x00, 0x00, 0x00, 0x02,
+		0x00, 0x00, 0x01, 0x00, 0x18, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x0C, 0x00, 0x13, 0x0B,
+		0x00, 0x00, 0x13, 0x0B, 0x00, 0x00, 0x00, 0x00,
+		0x00, 0x00, 0x00, 0x00, 0x00, 0x00
+	};
+
+	write(socket, bmpHeader, sizeof(bmpHeader));
+
+	// Generate image data
+	int bitmapSize;
+	bitmapSize = BITMAP_HEIGHT * BITMAP_WIDTH;
+	bitmapSize *= BITMAP_BYTES_PER_PIXEL;
+	unsigned char bmpData[bitmapSize];
+	generateBitmapImage(bmpData, centreX, centreY, zoom);
+
+	write(socket, bmpData, bitmapSize);
+}
+
 
 // start the server listening on the specified port number
-int makeServerSocket (int portNumber) { 
-   
-   // create socket
-   int serverSocket = socket (AF_INET, SOCK_STREAM, 0);
-   assert (serverSocket >= 0);   
-   // error opening socket
-   
-   // bind socket to listening port
-   struct sockaddr_in serverAddress;
-   memset ((char *) &serverAddress, 0,sizeof (serverAddress));
-   
-   serverAddress.sin_family      = AF_INET;
-   serverAddress.sin_addr.s_addr = INADDR_ANY;
-   serverAddress.sin_port        = htons (portNumber);
-   
-   // let the server start immediately after a previous shutdown
-   int optionValue = 1;
-   setsockopt (
-      serverSocket,
-      SOL_SOCKET,
-      SO_REUSEADDR,
-      &optionValue, 
-      sizeof(int)
-   );
+int makeServerSocket(int portNumber) {
+	// create socket
+	int serverSocket = socket(AF_INET, SOCK_STREAM, 0);
+	assert(serverSocket >= 0);
+	// error opening socket
+	// bind socket to listening port
+	struct sockaddr_in serverAddress;
+	bzero((char *)&serverAddress, sizeof(serverAddress));
+	serverAddress.sin_family = AF_INET;
+	serverAddress.sin_addr.s_addr = INADDR_ANY;
+	serverAddress.sin_port = htons(portNumber);
+	// let the server start immediately after a previous shutdown
+	int optionValue = 1;
+	setsockopt(
+		serverSocket,
+		SOL_SOCKET,
+		SO_REUSEADDR,
+		&optionValue,
+		sizeof(int)
+		);
 
-   int bindSuccess = 
-      bind (
-         serverSocket, 
-         (struct sockaddr *) &serverAddress,
-         sizeof (serverAddress)
-      );
-   
-   assert (bindSuccess >= 0);
-   // if this assert fails wait a short while to let the operating 
-   // system clear the port before trying again
-   
-   return serverSocket;
+	int bindSuccess =
+		bind(
+			serverSocket,
+			(struct sockaddr *) &serverAddress,
+			sizeof(serverAddress)
+			);
+	assert(bindSuccess >= 0);
+	// if this assert fails wait a short while to let the operating
+	// system clear the port before trying again
+	return serverSocket;
 }
 
 // wait for a browser to request a connection,
 // returns the socket on which the conversation will take place
-int waitForConnection (int serverSocket) {
-   // listen for a connection
-   const int serverMaxBacklog = 10;
-   listen (serverSocket, serverMaxBacklog);
-   
-   // accept the connection
-   struct sockaddr_in clientAddress;
-   socklen_t clientLen = sizeof (clientAddress);
-   int connectionSocket = 
-      accept (
-         serverSocket, 
-         (struct sockaddr *) &clientAddress, 
-         &clientLen
-      );
-   
-   assert (connectionSocket >= 0);
-   // error on accept
-   
-   return (connectionSocket);
-}
-// viewer
-static void serveHTML(int socket) {
-	char* message;
-
-	// first send the http response header
-	message =
-		"HTTP/1.0 200 Found\n"
-		"Content-Type: text/html\n"
-		"\n";
-	printf("about to send=> %s\n", message);
-	write(socket, message, strlen(message));
-
-	message =
-		"<!DOCTYPE html>\n"
-		"<script src=\"http://almondbread.cse.unsw.edu.au/tiles.js\"></script>"
-		"\n";
-	write(socket, message, strlen(message));
+int waitForConnection(int serverSocket) {
+	// listen for a connection
+	const int serverMaxBacklog = 10;
+	listen(serverSocket, serverMaxBacklog);
+	// accept the connection
+	struct sockaddr_in clientAddress;
+	socklen_t clientLen = sizeof(clientAddress);
+	int connectionSocket =
+		accept(
+			serverSocket,
+			(struct sockaddr *) &clientAddress,
+			&clientLen
+			);
+	assert(connectionSocket >= 0);
+	// error on accept
+	return (connectionSocket);
 }
 
-int escapeSteps(double x, double y) {
-	int steps = 0;
-	double calcx = 0;
-	double calcy = 0;
-	double tempx;
-	while (calcx*calcx + calcy*calcy < 4 && steps < MAX_STEP) {
-		tempx = (calcx*calcx - calcy*calcy) + x;
-		calcy = (2 * calcx*calcy) + y;
-		calcx = tempx;
-		steps++;
+void generateBitmapImage(unsigned char bmpData[],
+	double centreX, double centreY, int zoom) {
+	int drawingX;
+	int drawingY;
+
+	// The index of the desired row
+	int bitmapRow;
+	// The index of the desired column
+	int bitmapColumn;
+
+	double scaledX, scaledY;
+	double scale;
+
+	int iterations;
+
+	scale = 1 / power(2, zoom);
+
+	drawingY = 0;
+	while (drawingY < BITMAP_HEIGHT) {
+		drawingX = 0;
+		while (drawingX < BITMAP_WIDTH) {
+			// centering
+			scaledX = centreX - (BITMAP_WIDTH / 2) * scale;
+			scaledY = centreY - (BITMAP_HEIGHT / 2) * scale;
+
+			// calculate current point
+			scaledX += drawingX * scale;
+			scaledY += drawingY * scale;
+
+			bitmapRow = drawingY *
+				(BITMAP_WIDTH * BITMAP_BYTES_PER_PIXEL);
+			bitmapColumn = drawingX * BITMAP_BYTES_PER_PIXEL;
+			iterations = escapeSteps(scaledX, scaledY);
+			bmpData[bitmapRow + bitmapColumn] = stepsToBlue(iterations);
+			bmpData[bitmapRow + bitmapColumn + 1] = stepsToGreen(iterations);;
+			bmpData[bitmapRow + bitmapColumn + 2] = stepsToRed(iterations);;
+
+			drawingX++;
+		}
+		drawingY++;
 	}
-	return steps;
 }
 
-// below are functions for getting x, y, z from server
+double power(int base, int exponent) {
+	int i = 0;
+	double calcResult = 1;
+	while (i < exponent) {
+		calcResult *= base;
+		i++;
+	}
+
+	return calcResult;
+}
+
 int getValuesFromConnectionString(char* connectionString,
 	double* x, double* y, int* z) {
 	int index = 0;
@@ -414,3 +403,5 @@ int readIntFromString(char* str) {
 
 	return value;
 }
+Status API Training Shop Blog About
+© 2016 GitHub, Inc.Terms Privacy Security Contact Help

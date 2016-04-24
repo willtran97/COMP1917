@@ -7,56 +7,52 @@
 * Date: 18/04/2016
 */
 
-#include <stdio.h>
-#include <stdlib.h>
-#include "pixelColor.h"
-#define MAX 255
-#define MIN 0
+#define MAX_ITERATIONS 256
+#define FIRST_STEP (4 * MAX_ITERATIONS / 5)
+#define SECOND_STEP (2 * MAX_ITERATIONS / 5)
 
-//RED intensity
-unsigned char stepsToRed(int steps) {
-	unsigned char intensity = 0;
-	if (steps >= MAX) {
-		intensity = MAX;
-	}
-	else if (steps <= MIN) {
-		intensity = MIN;
-	}
-	else if (steps > MIN && steps < MAX) {
-		intensity = steps;
-	}
 
-	return intensity;
-}
-
-//BLUE intensity
 unsigned char stepsToBlue(int steps) {
-	unsigned char intensity = 0;
-	if (steps >= MAX) {
-		intensity = MAX;
+	unsigned char result;
+	if (steps == MAX_ITERATIONS) {
+		result = 0x00;
 	}
-	else if (steps <= MIN) {
-		intensity = MIN;
+	else if (steps > FIRST_STEP) {
+		result = 0xFF * steps / MAX_ITERATIONS * 2;
 	}
-	else if (steps > MIN && steps < MAX) {
-		intensity = steps;
+	else {
+		result = 0xAA * MAX_ITERATIONS / steps;
 	}
 
-	return intensity;
+	return result;
 }
-
-//GREEN intensity
+unsigned char stepsToRed(int steps) {
+	unsigned char result;
+	if (steps == MAX_ITERATIONS) {
+		result = 0x00;
+	}
+	else if (steps > SECOND_STEP) {
+		result = 0xCC * steps / MAX_ITERATIONS;
+	}
+	else {
+		result = 0x44 * steps / MAX_ITERATIONS;
+	}
+	return result;
+}
 unsigned char stepsToGreen(int steps) {
-	unsigned char intensity = 0;
-	if (steps >= MAX) {
-		intensity = MAX;
+	unsigned char result;
+	if (steps == MAX_ITERATIONS) {
+		result = 0x00;
 	}
-	else if (steps <= MIN) {
-		intensity = MIN;
+	else if (steps > FIRST_STEP) {
+		result = 0xFF * steps / MAX_ITERATIONS * 2;
 	}
-	else if (steps > MIN && steps < MAX) {
-		intensity = steps;
+	else if (steps > SECOND_STEP) {
+		result = 0x77 * steps / MAX_ITERATIONS;
+	}
+	else {
+		result = 0x33 * 60 / steps;
 	}
 
-	return intensity;
+	return result;
 }
